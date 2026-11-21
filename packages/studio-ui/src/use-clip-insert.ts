@@ -558,8 +558,13 @@ export function useClipInsert(deps: ClipInsertDeps) {
     const mode = options.mode ?? 'ripple';
     setClipPending(at);
     try {
-      if (target.kind !== 'primary') {
-        await insertLibraryVisualAt(a, at, target, mode, options.fitSec);
+      // Images should be inserted onto visual tracks, not the narrative track.
+      // If target is 'primary' but the asset is an image, create a visual track instead.
+      if (target.kind !== 'primary' || a.type === 'image') {
+        const visualTarget: TimelineVisualDropTarget = target.kind !== 'primary'
+          ? target
+          : { kind: 'new' as const, slot: 1, stackOrder: 1 };
+        await insertLibraryVisualAt(a, at, visualTarget, mode, options.fitSec);
         return;
       }
       const coreOptions: InsertClipCoreOptions = options.target

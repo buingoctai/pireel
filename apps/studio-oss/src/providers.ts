@@ -21,5 +21,19 @@ setStudioProviders({
       return { url: j.url, key: j.key };
     },
   },
+  vault: {
+    // OSS shell stores to local disk via the same /local-assets route
+    async backup(file, sig, options) {
+      const r = await fetch('/local-assets', {
+        method: 'POST',
+        headers: { 'content-type': file.type || 'application/octet-stream' },
+        body: file,
+        signal: options.signal,
+      });
+      const j = (await r.json().catch(() => ({}))) as { url?: string; key?: string; error?: string };
+      if (!r.ok || !j.key) throw new Error(j.error ?? `backup failed (${r.status})`);
+      return { key: j.key };
+    },
+  },
 });
 

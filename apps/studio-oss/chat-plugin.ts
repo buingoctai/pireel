@@ -1,6 +1,9 @@
 import type { Connect, Plugin } from 'vite';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { convertToModelMessages, streamText, type UIMessage } from 'ai';
+import { V3_CHAT_TOOL_IDS, CHAT_SERVER_EXECUTED_TOOLS } from '@pireel/studio-engine/agent-surface-v3/registry';
+import { V3_TOOL_SCHEMAS } from '@pireel/studio-engine/agent-surface-v3/schemas';
+import { AGENT_INSTRUCTIONS } from '@pireel/studio-engine/agent-surface-v3/instructions';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -20,6 +23,21 @@ function sendJson(res: import('node:http').ServerResponse, status: number, body:
 }
 
 export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string }): Plugin {
+  // Build tools map for AI SDK: only client-executed tools (server-executed tools are handled separately)
+  const tools: Record<string, { description: string; parameters: unknown }> = {};
+  for (const toolId of V3_CHAT_TOOL_IDS) {
+    // Skip server-executed tools; they're handled by the client
+    if (CHAT_SERVER_EXECUTED_TOOLS.has(toolId)) continue;
+
+    const schema = V3_TOOL_SCHEMAS[toolId];
+    if (schema) {
+      tools[toolId] = {
+        description: schema.description,
+        parameters: schema.inputSchema,
+      };
+    }
+  }
+
   return {
     name: 'pireel-chat',
     configureServer(server) {
@@ -37,7 +55,10 @@ export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string 
           const google = createGoogleGenerativeAI({ apiKey });
           const result = streamText({
             model: google(model || DEFAULT_MODEL),
+            system: AGENT_INSTRUCTIONS,
             messages: await convertToModelMessages(messages),
+            tools,
+            maxSteps: 10, // Allow multi-step tool execution
           });
 
           const response = result.toUIMessageStreamResponse();
