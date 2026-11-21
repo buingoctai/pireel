@@ -1,6 +1,6 @@
 import type { Connect, Plugin } from 'vite';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
-import { convertToModelMessages, streamText, type UIMessage } from 'ai';
+import { convertToModelMessages, jsonSchema, stepCountIs, streamText, tool, type UIMessage } from 'ai';
 import { V3_CHAT_TOOL_IDS, CHAT_SERVER_EXECUTED_TOOLS } from '@pireel/studio-engine/agent-surface-v3/registry';
 import { V3_TOOL_SCHEMAS } from '@pireel/studio-engine/agent-surface-v3/schemas';
 import { AGENT_INSTRUCTIONS } from '@pireel/studio-engine/agent-surface-v3/instructions';
@@ -23,18 +23,18 @@ function sendJson(res: import('node:http').ServerResponse, status: number, body:
 }
 
 export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string }): Plugin {
-  // Build tools map for AI SDK: only client-executed tools (server-executed tools are handled separately)
-  const tools: Record<string, { description: string; parameters: unknown }> = {};
+  // Build tools map for AI SDK v6: wrap JSON schema with jsonSchema() and tool()
+  const tools: Record<string, ReturnType<typeof tool>> = {};
   for (const toolId of V3_CHAT_TOOL_IDS) {
     // Skip server-executed tools; they're handled by the client
     if (CHAT_SERVER_EXECUTED_TOOLS.has(toolId)) continue;
 
     const schema = V3_TOOL_SCHEMAS[toolId];
     if (schema) {
-      tools[toolId] = {
+      tools[toolId] = tool({
         description: schema.description,
-        parameters: schema.inputSchema,
-      };
+        parameters: jsonSchema(schema.inputSchema),
+      });
     }
   }
 
@@ -58,7 +58,7 @@ export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string 
             system: AGENT_INSTRUCTIONS,
             messages: await convertToModelMessages(messages),
             tools,
-            maxSteps: 10, // Allow multi-step tool execution
+            stopWhen: stepCountIs(10), // AI SDK v6: use stopWhen instead of maxSteps
           });
 
           const response = result.toUIMessageStreamResponse();
