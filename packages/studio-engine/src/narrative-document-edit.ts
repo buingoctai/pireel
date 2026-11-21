@@ -241,7 +241,10 @@ export function addNarrativeDocumentClip(input: AddNarrativeDocumentClipInput): 
   let document = input.document;
   const receipts: EditorCommandReceipt[] = [];
   const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
-  const firstSource = !primary?.clips.some((clip) => clip.kind === 'narrative');
+  if (!primary) {
+    return failure(input.document, 'primary-track-required', `Primary narrative track not found: ${document.semantics.primaryNarrativeTrackId}`, 'document.semantics.primaryNarrativeTrackId');
+  }
+  const firstSource = !primary.clips.some((clip) => clip.kind === 'narrative');
   if (firstSource && input.configureCanvas !== false && input.sourceWidth && input.sourceHeight) {
     const canvas = applyEditorCommand(document, { type: 'canvas.patch', patch: { width: input.sourceWidth, height: input.sourceHeight } });
     if (!canvas.ok) return { ok: false, document: input.document, error: canvas.error };
