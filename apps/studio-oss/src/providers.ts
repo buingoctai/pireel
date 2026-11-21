@@ -6,6 +6,7 @@ setStudioProviders({
   ...unavailableProviders(
     'Local uploads are unavailable',
   ),
+  chatEndpoint: '/api/studio/chat',
   // Uploads go to the local disk route (vite plugin local-assets-plugin.ts): stable
   // same-origin relative URLs, loadable by the preview iframe and the client export.
   uploads: {
