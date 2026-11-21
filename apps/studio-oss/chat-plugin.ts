@@ -1,9 +1,6 @@
 import type { Connect, Plugin } from 'vite';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { convertToModelMessages, jsonSchema, stepCountIs, streamText, tool, type UIMessage } from 'ai';
-import { V3_CHAT_TOOL_IDS, CHAT_SERVER_EXECUTED_TOOLS } from '@pireel/studio-engine/agent-surface-v3/registry';
-import { V3_TOOL_SCHEMAS } from '@pireel/studio-engine/agent-surface-v3/schemas';
-import { AGENT_INSTRUCTIONS } from '@pireel/studio-engine/agent-surface-v3/instructions';
 
 const DEFAULT_MODEL = 'gemini-flash-latest';
 
@@ -23,19 +20,29 @@ function sendJson(res: import('node:http').ServerResponse, status: number, body:
 }
 
 export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string }): Plugin {
-  // Build tools map for AI SDK v6: wrap JSON schema with jsonSchema() and tool()
-  const tools: Record<string, ReturnType<typeof tool>> = {};
-  for (const toolId of V3_CHAT_TOOL_IDS) {
-    // Skip server-executed tools; they're handled by the client
-    if (CHAT_SERVER_EXECUTED_TOOLS.has(toolId)) continue;
+  // Defer studio-engine imports to avoid Node ESM resolution during vite.config.ts load
+  let tools: Record<string, ReturnType<typeof tool>> | null = null;
 
-    const schema = V3_TOOL_SCHEMAS[toolId];
-    if (schema) {
-      tools[toolId] = tool({
-        description: schema.description,
-        parameters: jsonSchema(schema.inputSchema),
-      });
+  async function getTools() {
+    if (tools) return tools;
+
+    const [{ V3_CHAT_TOOL_IDS, CHAT_SERVER_EXECUTED_TOOLS }, { V3_TOOL_SCHEMAS }] = await Promise.all([
+      import('@pireel/studio-engine/agent-surface-v3/registry'),
+      import('@pireel/studio-engine/agent-surface-v3/schemas'),
+    ]);
+
+    tools = {};
+    for (const toolId of V3_CHAT_TOOL_IDS) {
+      if (CHAT_SERVER_EXECUTED_TOOLS.has(toolId)) continue;
+      const schema = V3_TOOL_SCHEMAS[toolId];
+      if (schema) {
+        tools[toolId] = tool({
+          description: schema.description,
+          inputSchema: jsonSchema(schema.inputSchema),
+        });
+      }
     }
+    return tools;
   }
 
   return {
@@ -52,12 +59,14 @@ export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string 
           // The chat transport posts UIMessages (parts-based), and expects the UI message stream back.
           const { messages } = JSON.parse((await readBody(req)).toString('utf8')) as { messages: UIMessage[] };
 
+          const { AGENT_INSTRUCTIONS } = await import('@pireel/studio-engine/agent-surface-v3/instructions');
+
           const google = createGoogleGenerativeAI({ apiKey });
           const result = streamText({
             model: google(model || DEFAULT_MODEL),
             system: AGENT_INSTRUCTIONS,
             messages: await convertToModelMessages(messages),
-            tools,
+            tools: await getTools(),
             stopWhen: stepCountIs(10), // AI SDK v6: use stopWhen instead of maxSteps
           });
 
