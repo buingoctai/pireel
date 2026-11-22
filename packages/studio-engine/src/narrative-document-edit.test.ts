@@ -44,6 +44,19 @@ describe('native narrative structure edits', () => {
     ]);
   });
 
+  it('creates the primary track when a document has none instead of failing the first insert', () => {
+    const document = emptyDocument();
+    document.timeline.tracks = [];
+    const result = addNarrativeDocumentClip({
+      document,
+      atSec: 0,
+      shot: { id: 'first', src: 'blob:first', srcSig: 'first.mp4:10:1', srcStart: 0, srcEnd: 4, treatment: 'full' },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.document.timeline.tracks.find((track) => track.role === 'primaryNarrative')?.clips).toMatchObject([{ id: 'first', startFrame: 0 }]);
+  });
+
   it('preserves explicit gaps while reordering stable clip identities', () => {
     const document = emptyDocument();
     document.assets.video = { id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.test/v.mp4' }, metadata: { durationSec: 8 } };

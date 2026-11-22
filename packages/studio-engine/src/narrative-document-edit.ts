@@ -240,9 +240,30 @@ export function addNarrativeDocumentClip(input: AddNarrativeDocumentClipInput): 
 
   let document = input.document;
   const receipts: EditorCommandReceipt[] = [];
-  const primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
+  let primary = document.timeline.tracks.find((track) => track.id === document.semantics.primaryNarrativeTrackId);
   if (!primary) {
-    return failure(input.document, 'primary-track-required', `Primary narrative track not found: ${document.semantics.primaryNarrativeTrackId}`, 'document.semantics.primaryNarrativeTrackId');
+    // An empty project may not carry its primary lane yet: create it instead of failing the first insert.
+    const primaryId = document.semantics.primaryNarrativeTrackId || 'track_primary_narrative';
+    if (document.timeline.tracks.some((track) => track.id === primaryId)) {
+      return failure(input.document, 'primary-track-required', `Primary narrative track is invalid: ${primaryId}`, 'document.semantics.primaryNarrativeTrackId');
+    }
+    primary = {
+      id: primaryId,
+      type: 'visual',
+      role: 'primaryNarrative',
+      name: 'Primary narrative',
+      muted: false,
+      hidden: false,
+      locked: false,
+      syncLocked: true,
+      stackOrder: 0,
+      clips: [],
+    };
+    document = {
+      ...document,
+      timeline: { ...document.timeline, tracks: [primary, ...document.timeline.tracks] },
+      semantics: { ...document.semantics, primaryNarrativeTrackId: primaryId },
+    };
   }
   const firstSource = !primary.clips.some((clip) => clip.kind === 'narrative');
   if (firstSource && input.configureCanvas !== false && input.sourceWidth && input.sourceHeight) {
