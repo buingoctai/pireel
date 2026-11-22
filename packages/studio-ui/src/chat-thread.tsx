@@ -1571,11 +1571,17 @@ export function ChatThread({
           {error && (latestTask(messages)?.mode !== 'one-click' || error.message?.includes('insufficient_tokens')) && (
             <div className="border-line bg-panel-2 flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-[12px]">
               <X size={12} className="shrink-0 text-destructive" />
-              <span className="min-w-0 flex-1 truncate text-destructive">
+              <span className="min-w-0 flex-1 text-destructive" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
                 {error.message?.includes("insufficient_tokens")
                   ? t("chatGen.notEnoughCreditsTop")
                   : error.message?.includes("studio_upstream_busy")
                     ? t("chatGen.upstreamBusy")
+                    : (error.message && (
+                        error.message.includes("API key") ||
+                        error.message.includes("not configured") ||
+                        error.message.includes("not found")
+                      ))
+                    ? error.message
                     : t("chatGen.interruptedStatePreserved")}
               </span>
               {!error.message?.includes("insufficient_tokens") && (
