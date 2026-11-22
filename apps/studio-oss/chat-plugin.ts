@@ -18,19 +18,30 @@ async function sleep(ms: number): Promise<void> {
 }
 
 function isQuotaError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
+  if (!error || typeof error !== 'object') return false;
 
-  // Check statusCode from APICallError
-  if (error && typeof error === 'object' && 'statusCode' in error) {
+  // Check statusCode from APICallError (429/503)
+  if ('statusCode' in error) {
     const statusCode = (error as any).statusCode;
     if (statusCode === 429 || statusCode === 503) return true;
   }
 
-  const msg = error.message.toLowerCase();
-  return msg.includes('429') ||
-         msg.includes('resource_exhausted') ||
-         msg.includes('503') ||
-         msg.includes('quota');
+  // Check responseBody for RESOURCE_EXHAUSTED
+  if ('responseBody' in error) {
+    const body = (error as any).responseBody;
+    if (body && typeof body === 'string' && body.includes('RESOURCE_EXHAUSTED')) return true;
+    if (body && typeof body === 'object' && JSON.stringify(body).includes('RESOURCE_EXHAUSTED')) return true;
+  }
+
+  // Fallback: check message field if present
+  if ('message' in error && typeof (error as any).message === 'string') {
+    const msg = (error as any).message.toLowerCase();
+    if (msg.includes('429') || msg.includes('resource_exhausted') || msg.includes('503') || msg.includes('quota')) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function getRetryDelayMs(error: unknown, attempt: number): number {
@@ -108,8 +119,9 @@ export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string 
                 messages: await convertToModelMessages(messages),
                 tools: await getTools(server),
                 stopWhen: stepCountIs(10), // AI SDK v6: use stopWhen instead of maxSteps
-                onError: (error) => {
-                  // Capture streaming errors before they reach the response
+                maxRetries: 0, // Disable SDK retries, use plugin retry logic
+                onError: ({error}) => {
+                  // AI SDK v6: onError receives {error} wrapper
                   streamError = error;
                 },
               });
