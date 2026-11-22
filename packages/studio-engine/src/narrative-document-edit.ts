@@ -273,7 +273,10 @@ export function addNarrativeDocumentClip(input: AddNarrativeDocumentClipInput): 
     receipts.push(canvas.receipt);
   }
 
-  const preferred = input.assetId ? document.assets[input.assetId] : undefined;
+  // A preferred asset is only reusable when it is already a video: an image-kind library asset (manual Insert of a
+  // still) must not back a narrative clip — the converted still MP4 gets its own new video asset instead.
+  const existingPreferred = input.assetId ? document.assets[input.assetId] : undefined;
+  const preferred = existingPreferred?.kind === 'video' ? existingPreferred : undefined;
   const reused = preferred ?? (!input.assetId ? existingAsset(document, input.shot) : undefined);
   const assetId = reused?.id
     ?? (input.assetId && !document.assets[input.assetId]

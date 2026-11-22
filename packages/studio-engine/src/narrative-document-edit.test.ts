@@ -57,6 +57,31 @@ describe('native narrative structure edits', () => {
     expect(result.document.timeline.tracks.find((track) => track.role === 'primaryNarrative')?.clips).toMatchObject([{ id: 'first', startFrame: 0 }]);
   });
 
+  it('does not reuse an image-kind library asset as the narrative asset id (manual Insert of a still)', () => {
+    const document = emptyDocument();
+    document.assets.local_image = {
+      id: 'local_image',
+      kind: 'image',
+      label: 'photo.jpg',
+      locator: { localSig: 'photo.jpg:10:1' },
+      metadata: { width: 1920, height: 1080 },
+    } as (typeof document.assets)[string];
+    const result = addNarrativeDocumentClip({
+      document,
+      atSec: 0,
+      assetId: 'local_image',
+      shot: { id: 'still', src: 'blob:still', srcSig: 'photo.jpg:10:1:still', srcStart: 0, srcEnd: 5, treatment: 'full' },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.assetId).not.toBe('local_image');
+    expect(result.document.assets[result.assetId!].kind).toBe('video');
+    expect(result.document.assets.local_image.kind).toBe('image');
+    expect(result.document.timeline.tracks.find((track) => track.role === 'primaryNarrative')?.clips).toMatchObject([
+      { id: 'still', assetId: result.assetId, startFrame: 0 },
+    ]);
+  });
+
   it('preserves explicit gaps while reordering stable clip identities', () => {
     const document = emptyDocument();
     document.assets.video = { id: 'video', kind: 'video', locator: { remoteUrl: 'https://cdn.test/v.mp4' }, metadata: { durationSec: 8 } };
