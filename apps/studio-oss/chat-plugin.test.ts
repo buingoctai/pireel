@@ -249,4 +249,23 @@ describe('chatPlugin', () => {
     // Should return 500
     expect(mockRes.statusCode).toBe(500);
   });
+
+  it('returns clear error message when API key is missing', async () => {
+    const plugin = chatPlugin({ apiKey: undefined, model: 'test-model' });
+    plugin.configureServer!(mockServer as ViteDevServer);
+
+    const middlewareHandler = (mockServer.middlewares!.use as any).mock.calls[0][0];
+
+    await middlewareHandler(mockReq, mockRes, nextFn);
+
+    // Should return 500 with clear error message
+    expect(mockRes.statusCode).toBe(500);
+    expect(mockRes.end).toHaveBeenCalled();
+    const endCall = (mockRes.end as any).mock.calls[0][0];
+    const response = JSON.parse(endCall);
+    expect(response.error).toContain('Gemini API key not found');
+    expect(response.error).toContain('GEMINI_API_KEY');
+    expect(response.error).toContain('GOOGLE_API_KEY');
+    expect(response.error).toContain('GOOGLE_GENERATIVE_AI_API_KEY');
+  });
 });

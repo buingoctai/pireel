@@ -94,7 +94,9 @@ export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string 
         if (req.url !== '/api/studio/chat' || req.method !== 'POST') return next();
 
         if (!apiKey) {
-          return sendJson(res, 500, { error: 'GOOGLE_GENERATIVE_AI_API_KEY is not set in apps/studio-oss/.env.local' });
+          return sendJson(res, 500, {
+            error: 'Gemini API key not found. Set GEMINI_API_KEY, GOOGLE_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY in apps/studio-oss/.env.local'
+          });
         }
 
         try {

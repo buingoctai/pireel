@@ -28,11 +28,14 @@ setStudioProviders({
         method: 'POST',
         headers: { 'content-type': file.type || 'application/octet-stream' },
         body: file,
-        signal: options.signal,
+        signal: options?.signal,
       });
       const j = (await r.json().catch(() => ({}))) as { url?: string; key?: string; error?: string };
       if (!r.ok || !j.key) throw new Error(j.error ?? `backup failed (${r.status})`);
       return { key: j.key };
+    },
+    async fetch() {
+      throw new Error('Vault fetch not implemented in OSS shell');
     },
   },
 });
