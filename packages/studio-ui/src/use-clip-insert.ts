@@ -659,16 +659,21 @@ export function useClipInsert(deps: ClipInsertDeps) {
         }
         const url = createClipObjectUrl(f);
         if (!url) return;
+        // Image → still video is a derived asset, so don't pass localAsset (which has image asset id)
+        // This fixes "Asset is not video" error when inserting images
+        const imageInsertOptions: InsertClipCoreOptions = options.target
+          ? { placement: 'exact', mode }
+          : {};
         if (effectiveSig) {
           // One asset, one identity: the shot records the IMAGE's sig (panel dedupe holds — no
           // phantom "5s video" card); the image bytes persist through the local handle/OPFS only,
           // and recovery re-derives the still clip from them.
           const img = alignFileToSig(sourceFile, effectiveSig);
           void saveLocalVideo(img, effectiveSig).catch(() => {});
-          insertClipCore(url, STILL_CLIP_SEC, at, f, a.dims ? { w: a.dims.w, h: a.dims.h } : null, effectiveSig, coreOptions);
+          insertClipCore(url, STILL_CLIP_SEC, at, f, a.dims ? { w: a.dims.w, h: a.dims.h } : null, effectiveSig, imageInsertOptions);
         } else {
           void saveLocalVideo(f, fileSig(f)).catch(() => {});
-          insertClipCore(url, STILL_CLIP_SEC, at, f, a.dims ? { w: a.dims.w, h: a.dims.h } : null, undefined, coreOptions);
+          insertClipCore(url, STILL_CLIP_SEC, at, f, a.dims ? { w: a.dims.w, h: a.dims.h } : null, undefined, imageInsertOptions);
         }
       }
     } finally {

@@ -2,7 +2,7 @@ import type { Connect, Plugin } from 'vite';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { convertToModelMessages, jsonSchema, stepCountIs, streamText, tool, type UIMessage } from 'ai';
 
-const DEFAULT_MODEL = 'gemini-flash-latest';
+const DEFAULT_MODEL = 'gemini-3.1-flash-lite';
 
 function readBody(req: Connect.IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
@@ -11,6 +11,30 @@ function readBody(req: Connect.IncomingMessage): Promise<Buffer> {
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isQuotaError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message.toLowerCase();
+  return msg.includes('429') ||
+         msg.includes('resource_exhausted') ||
+         msg.includes('503') ||
+         msg.includes('quota');
+}
+
+function getRetryDelayMs(error: unknown, attempt: number): number {
+  // Check for Retry-After header or retryDelay in error
+  if (error && typeof error === 'object' && 'retryAfter' in error && typeof error.retryAfter === 'number') {
+    return error.retryAfter * 1000;
+  }
+  // Exponential backoff with jitter: 1s, 2s, 4s base, plus random jitter
+  const baseDelay = Math.min(1000 * Math.pow(2, attempt), 4000);
+  const jitter = Math.random() * 1000;
+  return baseDelay + jitter;
 }
 
 function sendJson(res: import('node:http').ServerResponse, status: number, body: unknown) {
@@ -62,31 +86,64 @@ export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string 
           const { AGENT_INSTRUCTIONS } = await server.ssrLoadModule('@pireel/studio-engine/agent-surface-v3/instructions');
 
           const google = createGoogleGenerativeAI({ apiKey });
-          const result = streamText({
-            model: google(model || DEFAULT_MODEL),
-            system: AGENT_INSTRUCTIONS,
-            messages: await convertToModelMessages(messages),
-            tools: await getTools(server),
-            stopWhen: stepCountIs(10), // AI SDK v6: use stopWhen instead of maxSteps
-          });
 
-          const response = result.toUIMessageStreamResponse();
-          res.statusCode = response.status;
-          response.headers.forEach((value, key) => res.setHeader(key, value));
+          // Retry logic for quota errors (429/503/RESOURCE_EXHAUSTED)
+          const MAX_RETRIES = 3;
+          let lastError: unknown;
 
-          const reader = response.body!.getReader();
-          try {
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              res.write(value);
+          for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            try {
+              const result = streamText({
+                model: google(model || DEFAULT_MODEL),
+                system: AGENT_INSTRUCTIONS,
+                messages: await convertToModelMessages(messages),
+                tools: await getTools(server),
+                stopWhen: stepCountIs(10), // AI SDK v6: use stopWhen instead of maxSteps
+              });
+
+              const response = result.toUIMessageStreamResponse();
+              res.statusCode = response.status;
+              response.headers.forEach((value, key) => res.setHeader(key, value));
+
+              const reader = response.body!.getReader();
+              try {
+                while (true) {
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  res.write(value);
+                }
+              } finally {
+                res.end();
+              }
+              return; // Success - exit retry loop
+            } catch (e) {
+              lastError = e;
+
+              // Only retry on quota errors
+              if (!isQuotaError(e) || attempt === MAX_RETRIES - 1) {
+                throw e;
+              }
+
+              const delayMs = getRetryDelayMs(e, attempt);
+              console.warn(`[pireel-chat] Quota error on attempt ${attempt + 1}, retrying in ${Math.round(delayMs)}ms...`);
+              await sleep(delayMs);
             }
-          } finally {
-            res.end();
           }
+
+          // All retries exhausted
+          throw lastError;
         } catch (e) {
           if (res.headersSent) return void res.end();
-          sendJson(res, 500, { error: e instanceof Error ? e.message : 'chat failed' });
+
+          // User-friendly quota error message
+          if (isQuotaError(e)) {
+            const retrySeconds = Math.ceil(getRetryDelayMs(e, 2) / 1000);
+            sendJson(res, 429, {
+              error: `AI is busy — free-tier limit reached, please try again in ~${retrySeconds} seconds`
+            });
+          } else {
+            sendJson(res, 500, { error: e instanceof Error ? e.message : 'chat failed' });
+          }
         }
       });
     },
