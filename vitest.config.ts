@@ -12,5 +12,5 @@ export default defineConfig({
       '@pireel/studio-kit': new URL('./packages/studio-kit/src/index.ts', import.meta.url).pathname,
     },
   },
-  test: { environment: 'node', include: ['packages/*/src/**/*.test.ts'] },
+  test: { environment: 'node', include: ['packages/*/src/**/*.test.ts', 'apps/*/**.test.ts'] },
 });

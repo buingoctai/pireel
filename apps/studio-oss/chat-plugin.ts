@@ -116,34 +116,71 @@ export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string 
 
               const response = result.toUIMessageStreamResponse();
 
-              // Buffer first chunk to detect errors before committing to response
+              // Buffer chunks until we see a non-"start" chunk to detect errors before committing headers
               const reader = response.body!.getReader();
-              const firstChunk = await reader.read();
+              const bufferedChunks: Uint8Array[] = [];
+              let errorDetected: unknown = null;
 
-              // Check for error in first chunk (errors come as stream events, not exceptions)
-              if (firstChunk.value) {
-                const text = new TextDecoder().decode(firstChunk.value);
-                if (text.includes('"type":"error"') || streamError) {
-                  const error = streamError || new Error('Stream error detected');
-                  if (isQuotaError(error) && attempt < MAX_RETRIES - 1) {
-                    const delayMs = getRetryDelayMs(error, attempt);
-                    console.warn(`[pireel-chat] Quota error on attempt ${attempt + 1}, retrying in ${Math.round(delayMs)}ms...`);
-                    await sleep(delayMs);
-                    continue;
+              // Read chunks until we find a non-"start" chunk or error
+              while (true) {
+                const chunk = await reader.read();
+                if (chunk.done) break;
+                if (chunk.value) {
+                  bufferedChunks.push(chunk.value);
+                  const text = new TextDecoder().decode(chunk.value);
+
+                  // Check for error in this chunk
+                  if (text.includes('"type":"error"')) {
+                    // Parse to extract error details
+                    const lines = text.split('\n');
+                    for (const line of lines) {
+                      if (line.startsWith('data: ')) {
+                        try {
+                          const parsed = JSON.parse(line.slice(6));
+                          if (parsed.type === 'error') {
+                            errorDetected = new Error(parsed.errorText || 'Stream error');
+                            break;
+                          }
+                        } catch {}
+                      }
+                    }
                   }
-                  throw error;
+
+                  // Also check onError callback
+                  if (streamError) {
+                    errorDetected = streamError;
+                  }
+
+                  // If we found an error, check if it's retryable
+                  if (errorDetected) {
+                    if (isQuotaError(errorDetected) && attempt < MAX_RETRIES - 1) {
+                      const delayMs = getRetryDelayMs(errorDetected, attempt);
+                      console.warn(`[pireel-chat] Quota error on attempt ${attempt + 1}, retrying in ${Math.round(delayMs)}ms...`);
+                      await sleep(delayMs);
+                      break; // Exit chunk-reading loop to retry
+                    }
+                    throw errorDetected;
+                  }
+
+                  // Check if this is a non-"start" chunk - if so, we can commit
+                  if (!text.includes('"type":"start"')) {
+                    break; // Exit chunk-reading loop, commit to response
+                  }
                 }
               }
 
-              // No error detected - commit to response and stream
+              // If we detected a retryable error, continue to next retry attempt
+              if (errorDetected && isQuotaError(errorDetected) && attempt < MAX_RETRIES - 1) {
+                continue;
+              }
+
+              // No retryable error detected - commit to response and stream
               res.statusCode = response.status;
               response.headers.forEach((value, key) => res.setHeader(key, value));
 
-              // Write buffered first chunk
-              if (firstChunk.value) res.write(firstChunk.value);
-              if (firstChunk.done) {
-                res.end();
-                return;
+              // Write all buffered chunks
+              for (const chunk of bufferedChunks) {
+                res.write(chunk);
               }
 
               // Stream remaining chunks
