@@ -23,3 +23,9 @@ it('does not bypass host configuration for an absolute same-origin service URL',
  await expect(editorRequest('http://localhost:5173/api/studio/chat')).rejects.toThrow('not configured');
  expect(network).not.toHaveBeenCalled();
 });
+
+it('allows chat requests to use fetch when chatEndpoint is configured but no host request', async () => {
+ const network=vi.fn(async()=>Response.json({ok:true}));vi.stubGlobal('fetch',network);setStudioProviders({...unavailableProviders(),chatEndpoint:'/api/studio/chat'});
+ await editorRequest('/api/studio/chat',{method:'POST',body:'{}'});
+ expect(network).toHaveBeenCalledWith('/api/studio/chat',{method:'POST',body:'{}'});
+});

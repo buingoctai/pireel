@@ -22,6 +22,7 @@ export const editorRequest: typeof fetch = (input, init) => {
 
   if (localApi || url === services.chatEndpoint) {
     if (services.request) return services.request(input, init);
+    if (services.chatEndpoint === url) return fetch(input, init);
     return Promise.reject(new Error('AI service is not configured. Connect an AI provider in the editor host.'));
   }
   return fetch(input, init);
