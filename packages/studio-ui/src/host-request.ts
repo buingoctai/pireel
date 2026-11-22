@@ -1,5 +1,12 @@
 import { studioProviders } from '@pireel/studio-engine/providers';
 
+/** Asset library routes that work locally without a host */
+function isLocalAssetRoute(url: string): boolean {
+  return url.startsWith('/api/me/materials') ||
+         url.startsWith('/api/me/uploads') ||
+         url.startsWith('/local-assets/');
+}
+
 /** Platform HTTP calls are supplied by the embedding host; local media remains ordinary fetch. */
 export const editorRequest: typeof fetch = (input, init) => {
   const services = studioProviders();
@@ -9,9 +16,12 @@ export const editorRequest: typeof fetch = (input, init) => {
   if (origin) {
     try { const parsed = new URL(url, origin); localApi ||= parsed.origin === origin && parsed.pathname.startsWith('/api/'); } catch { /* fetch reports malformed resource URLs */ }
   }
+
+  // Asset library routes can use fetch directly in local dev
+  if (isLocalAssetRoute(url)) return fetch(input, init);
+
   if (localApi || url === services.chatEndpoint) {
     if (services.request) return services.request(input, init);
-    if (localApi || services.chatEndpoint === url) return fetch(input, init);
     return Promise.reject(new Error('AI service is not configured. Connect an AI provider in the editor host.'));
   }
   return fetch(input, init);

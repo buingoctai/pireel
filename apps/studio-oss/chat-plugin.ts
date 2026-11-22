@@ -19,6 +19,13 @@ async function sleep(ms: number): Promise<void> {
 
 function isQuotaError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
+
+  // Check statusCode from APICallError
+  if (error && typeof error === 'object' && 'statusCode' in error) {
+    const statusCode = (error as any).statusCode;
+    if (statusCode === 429 || statusCode === 503) return true;
+  }
+
   const msg = error.message.toLowerCase();
   return msg.includes('429') ||
          msg.includes('resource_exhausted') ||
@@ -92,6 +99,8 @@ export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string 
           let lastError: unknown;
 
           for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            let streamError: unknown = null;
+
             try {
               const result = streamText({
                 model: google(model || DEFAULT_MODEL),
@@ -99,13 +108,45 @@ export function chatPlugin({ apiKey, model }: { apiKey?: string; model?: string 
                 messages: await convertToModelMessages(messages),
                 tools: await getTools(server),
                 stopWhen: stepCountIs(10), // AI SDK v6: use stopWhen instead of maxSteps
+                onError: (error) => {
+                  // Capture streaming errors before they reach the response
+                  streamError = error;
+                },
               });
 
               const response = result.toUIMessageStreamResponse();
+
+              // Buffer first chunk to detect errors before committing to response
+              const reader = response.body!.getReader();
+              const firstChunk = await reader.read();
+
+              // Check for error in first chunk (errors come as stream events, not exceptions)
+              if (firstChunk.value) {
+                const text = new TextDecoder().decode(firstChunk.value);
+                if (text.includes('"type":"error"') || streamError) {
+                  const error = streamError || new Error('Stream error detected');
+                  if (isQuotaError(error) && attempt < MAX_RETRIES - 1) {
+                    const delayMs = getRetryDelayMs(error, attempt);
+                    console.warn(`[pireel-chat] Quota error on attempt ${attempt + 1}, retrying in ${Math.round(delayMs)}ms...`);
+                    await sleep(delayMs);
+                    continue;
+                  }
+                  throw error;
+                }
+              }
+
+              // No error detected - commit to response and stream
               res.statusCode = response.status;
               response.headers.forEach((value, key) => res.setHeader(key, value));
 
-              const reader = response.body!.getReader();
+              // Write buffered first chunk
+              if (firstChunk.value) res.write(firstChunk.value);
+              if (firstChunk.done) {
+                res.end();
+                return;
+              }
+
+              // Stream remaining chunks
               try {
                 while (true) {
                   const { done, value } = await reader.read();
